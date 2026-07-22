@@ -8,7 +8,7 @@ User journeys inside the application. The core loop is: **ingest → scan → re
 - User navigates to `/scans` and clicks **New scan** (or Dashboard → New scan)
 - On `/scans/new`:
   - **Dataset** — a selector populated from `GET /datasets` (defaults to the seeded `demo`)
-  - **Sensitivity** — a selector: Strict (0.90) / Balanced (0.85) / Loose (0.80); Balanced default
+  - **Sensitivity** — a selector: Strict (0.92) / Balanced (0.90) / Loose (0.88); Balanced default
   - **Issue types** — checkboxes: Exact duplicates, Near-duplicates, Outliers, Broken files (all on)
   - **Label** — optional free-text name
 - Submitting `POST /scans` starts a background run and redirects to `/scans/[runId]`

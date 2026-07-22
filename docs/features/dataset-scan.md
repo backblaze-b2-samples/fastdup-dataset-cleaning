@@ -20,7 +20,7 @@ outliers, and broken/corrupt files — using fastdup, locally on CPU, with no ex
 
 ## Inputs
 - dataset: str (selector, from `GET /datasets`)
-- sensitivity: `strict` (0.90) / `balanced` (0.85) / `loose` (0.80) — maps to the fastdup near-duplicate similarity threshold
+- sensitivity: `strict` (0.92) / `balanced` (0.90) / `loose` (0.88) — maps to the fastdup near-duplicate similarity threshold (genuine near-dups embed at ~0.998, distinct images cross-link only up to ~0.84, so all three presets sit in that clean gap)
 - issue_types: subset of `duplicate`, `near_duplicate`, `outlier`, `broken`
 - label: optional free-text run name
 
@@ -36,10 +36,35 @@ outliers, and broken/corrupt files — using fastdup, locally on CPU, with no ex
   - exact duplicates → group by SHA-256 of the bytes (deterministic)
   - near-duplicates + outliers → **fastdup** (`fastdup.create(...).run(threshold=...)`), parsed
     from its similarity/outliers output; exact-dup pairs are excluded from near-dup grouping
+  - the SHA-256 exact-byte grouping is computed whenever *any* pass runs (dup, near-dup, or
+    outlier): it is both the reported "exact duplicates" section **and** the exclusion set that
+    keeps byte-identical pairs out of near-dups/outliers. Deselecting `duplicate` only hides the
+    exact section from the report — it never lets exact-byte pairs leak into near-duplicates
 - Report artifacts + `status.json` (`complete`) are written to B2; the temp dir is deleted
 - Frontend polls `GET /scans/{run_id}` every 2s while `running`
 
 ## Edge Cases
+- **fastdup version (pinned 2.x, not 1.x):** the app runs **fastdup 2.x** (`fastdup>=2.0,<3.0`,
+  resolves to 2.53). The 1.x line is deprecated and unusable here: fastdup 1.85's native engine
+  (`libfastdup_shared.dylib`) contains a hardcoded run-time self-abort ("This fastdup version is
+  deprecated, please reinstall from pypi") baked into the compiled binary — no env var or offline
+  mode can bypass it, so near-duplicate/outlier/default scans die at run time on 1.x.
+- **fastdup version gate (import-time):** some fastdup builds also run a "you're on an old
+  version" check **at import** that queries pypi and raises a `RuntimeError` when the installed
+  release is 10+ behind the latest and the network is reachable. `repo/scanner.py` sets
+  `FASTDUP_PRODUCTION=1` (via `os.environ.setdefault`, immediately before the lazy `import
+  fastdup`) to disable that network check; it's kept as future-proofing on 2.x (harmless when no
+  gate fires). Because it uses `setdefault`, a user can still force the check with
+  `FASTDUP_PRODUCTION=0`. Works offline and online, needs no user action.
+- **fastdup 2.x column schema:** `similarity()`/`outliers()` return the file **paths** in
+  `filename_from`/`filename_to`/`filename_outlier` and bare integer **row indices** in
+  `from`/`to`/`outlier`. The scanner reads the `filename_*` columns first so records key by
+  filename (which the service maps back to B2 keys); keying by the index columns would produce
+  garbage that can't be resolved.
+- **Pillow coupling:** fastdup 2.x hard-declares `Pillow==10.3.0`, so the app pins
+  `Pillow>=10.3.0,<11` (a `>=11` pin is mutually exclusive and breaks a fresh
+  `pip install -r requirements.txt` with `ResolutionImpossible`). numpy stays `<2` (fastdup 2.53
+  itself declares `numpy<2.0,>1.23.0`).
 - fastdup import/run failure → run is marked `failed` with the error (never silently mocked)
 - Fewer than 2 valid images → fastdup pass is skipped (nothing to compare)
 - Non-image objects (e.g. `manifest.csv`) → skipped during download

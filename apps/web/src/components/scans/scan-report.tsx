@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Copy, CopyPlus, ScatterChart, FileWarning, Trash2, ShieldCheck } from "lucide-react";
+import { Copy, CopyPlus, ScatterChart, FileWarning, Trash2, ShieldCheck, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,43 @@ import { formatDate } from "@/lib/utils";
 import { ScanStatusBadge } from "./scan-status-badge";
 import { Thumbnail } from "./thumbnail";
 import type { DuplicateGroup, ScanReport } from "@fastdup-dataset-cleaning/shared";
+
+// Running-state indicator. fastdup streams no per-image progress, so a
+// determinate percentage would be dishonest — instead we show an indeterminate
+// animated bar plus a live elapsed-time counter that ticks each second, so the
+// ~15-20s scan visibly advances rather than reading as frozen. The interval is
+// cleared on unmount, which happens as soon as the run leaves `running` (the
+// parent stops rendering this component when status flips to complete/failed).
+function RunningIndicator({ startedAt }: { startedAt: string }) {
+  const secondsSince = () =>
+    Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  const [elapsed, setElapsed] = useState(secondsSince);
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(secondsSince()), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startedAt]);
+
+  const mm = Math.floor(elapsed / 60);
+  const ss = String(elapsed % 60).padStart(2, "0");
+
+  return (
+    <div className="space-y-2">
+      <div
+        role="progressbar"
+        aria-label="Scanning in progress"
+        className="relative h-1.5 w-full overflow-hidden rounded-full bg-primary/20"
+      >
+        <div className="animate-indeterminate absolute top-0 h-full w-2/5 rounded-full bg-primary" />
+      </div>
+      <p className="text-sm text-muted-foreground tabular-nums">
+        Scanning… {mm}:{ss} elapsed · this page updates automatically when the run
+        finishes.
+      </p>
+    </div>
+  );
+}
 
 function StatPill({ label, value }: { label: string; value: number | string }) {
   return (
@@ -157,8 +195,16 @@ export function ScanReportView({ runId }: { runId: string }) {
                   onClick={onClean}
                   disabled={cleanScan.isPending || r.cleaned || r.issues_found === 0}
                 >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {r.cleaned ? "Cleaned" : "Apply cleaning"}
+                  {cleanScan.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  )}
+                  {cleanScan.isPending
+                    ? "Cleaning…"
+                    : r.cleaned
+                      ? "Cleaned"
+                      : "Apply cleaning"}
                 </Button>
               )}
               <AlertDialog>
@@ -200,11 +246,7 @@ export function ScanReportView({ runId }: { runId: string }) {
               view dataset gallery
             </Link>
           </p>
-          {r.status === "running" && (
-            <p className="text-sm text-muted-foreground">
-              Scanning… this page updates automatically when the run finishes.
-            </p>
-          )}
+          {r.status === "running" && <RunningIndicator startedAt={r.created_at} />}
           {r.status === "failed" && (
             <p className="text-sm text-[var(--destructive)]">
               Scan failed: {r.error ?? "unknown error"}

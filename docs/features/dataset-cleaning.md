@@ -46,6 +46,10 @@ original, so cleaning is always reversible.
 ## UX States
 - Button disabled when the run is not complete, has no issues, or is already cleaned
 - Success toast reports how many files were quarantined and that originals are untouched
+- After cleaning, the **detail/report page** reflects the cleaned state on reload: cleaning
+  writes `cleaned`/`quarantined_count` into `status.json`, and `get_run` overlays that onto the
+  (frozen) `report.json` it returns — so the "cleaned" badge shows and the "Apply cleaning"
+  button reads as already-cleaned, consistent with the scans list and dashboard.
 
 ## Verification
 - Test files: `services/api/tests/test_curation.py`

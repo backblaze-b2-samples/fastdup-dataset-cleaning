@@ -20,12 +20,31 @@ import os
 logger = logging.getLogger(__name__)
 
 # Similarity threshold per sensitivity preset. Higher = stricter (only very
-# similar pairs are flagged as near-duplicates).
+# similar pairs are even *considered* a near-duplicate link). fastdup's visual
+# embeddings are largely colour-invariant and group by composition/structure, so
+# the structurally-distinct base images cross-link only up to ~0.84, while a
+# genuine near-duplicate (the same image with a barely-perceptible perturbation)
+# embeds at ~0.998. Every threshold sits in that clean gap, so genuine near-dups
+# always group at balanced+loose and no distinct pair is ever even considered.
 SENSITIVITY_THRESHOLD = {
-    "strict": 0.90,
-    "balanced": 0.85,
-    "loose": 0.80,
+    "strict": 0.92,
+    "balanced": 0.90,
+    "loose": 0.88,
 }
+
+# Extra similarity, on top of the sensitivity threshold, that a pair must clear
+# before it may MERGE two images into the same near-duplicate group. This is the
+# anti-chaining safeguard: _near_duplicates() groups with single-linkage
+# union-find, so without it one loosely-similar (~threshold) cross-link chains
+# many structurally-distinct images into one runaway group. Genuine
+# near-duplicates score ~0.998 and clear threshold+margin at every sensitivity;
+# marginal cross-links between distinct images (<=~0.84) do not.
+NEAR_DUP_GROUP_MARGIN = 0.05
+
+# Cap on the merge floor so a genuine near-duplicate still merges even at the
+# strictest sensitivity (strict 0.92 + margin 0.05 = 0.97 uncapped; capping at
+# 0.95 keeps the floor safely below the ~0.998 genuine-near-dup similarity).
+NEAR_DUP_GROUP_FLOOR_MAX = 0.95
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
@@ -109,6 +128,14 @@ def _fastdup_pass(
     """
     import tempfile
 
+    # Some fastdup builds run a "you're on an old version" check AT IMPORT that
+    # queries pypi and RAISES a RuntimeError when the installed release is >10
+    # behind the latest and the network is reachable — so `import fastdup` itself
+    # would fail. Opting into production mode disables that network version gate;
+    # the engine works fine otherwise. `setdefault` lets a user still force the
+    # check by exporting FASTDUP_PRODUCTION=0. Must run BEFORE the import to take
+    # effect. Kept as future-proofing even on 2.x (harmless when no gate fires).
+    os.environ.setdefault("FASTDUP_PRODUCTION", "1")
     import fastdup
 
     work_dir = tempfile.mkdtemp(prefix="fastdup-work-")
@@ -116,7 +143,11 @@ def _fastdup_pass(
     fd.run(threshold=threshold, overwrite=True, print_summary=False)
 
     near_groups = _near_duplicates(fd, threshold, exact_dupes)
-    outliers = _outliers(fd, exact_dupes)
+    # An image that belongs to a near-duplicate group must not ALSO be reported as
+    # an outlier (contradictory, and it double-counts the file). Exclude near-dup
+    # members from the outlier pass, mirroring the exact-duplicate exclusion.
+    near_members = {m for g in near_groups for m in g["members"]}
+    outliers = _outliers(fd, exact_dupes | near_members)
     return near_groups, outliers
 
 
@@ -129,11 +160,22 @@ def _near_duplicates(fd, threshold: float, exact_dupes: set[str]) -> list[dict]:
     if sim is None or len(sim) == 0:
         return []
     cols = list(sim.columns)
-    c_from = _first_col(cols, ["from", "filename_from", "img_from"])
-    c_to = _first_col(cols, ["to", "filename_to", "img_to"])
+    # fastdup 2.x returns the actual file PATHS in filename_from/filename_to and
+    # bare integer row INDICES in from/to. Prefer the path columns so records key
+    # by filename (the service maps those to B2 keys); index columns are the
+    # fallback for older/alternate schemas.
+    c_from = _first_col(cols, ["filename_from", "img_from", "from"])
+    c_to = _first_col(cols, ["filename_to", "img_to", "to"])
     c_dist = _first_col(cols, ["distance", "score"])
     if not c_from or not c_to:
         return []
+
+    # Anti-chaining merge floor: a pair may MERGE two images into the same
+    # near-duplicate group only when it clears threshold+margin (capped by
+    # NEAR_DUP_GROUP_FLOOR_MAX so genuine ~0.998 near-dupes still merge at the
+    # strictest sensitivity), not merely `threshold`. `threshold` alone still
+    # gates whether a pair is even *considered* a near-duplicate link.
+    merge_floor = min(threshold + NEAR_DUP_GROUP_MARGIN, NEAR_DUP_GROUP_FLOOR_MAX)
 
     uf = _UnionFind()
     scores: dict[str, float] = {}
@@ -146,6 +188,11 @@ def _near_duplicates(fd, threshold: float, exact_dupes: set[str]) -> list[dict]:
             continue
         # Skip pairs that are exact-byte duplicates (already reported).
         if a in exact_dupes and b in exact_dupes:
+            continue
+        # Only merge when the pair clears the anti-chaining floor; a marginal
+        # (~threshold) cross-link between distinct images must not chain them
+        # into one runaway group.
+        if c_dist and dist < merge_floor:
             continue
         uf.union(a, b)
         key = uf.find(a)
@@ -171,7 +218,9 @@ def _outliers(fd, exact_dupes: set[str]) -> list[dict]:
     if out is None or len(out) == 0:
         return []
     cols = list(out.columns)
-    c_from = _first_col(cols, ["outlier", "from", "filename_outlier", "filename_from"])
+    # fastdup 2.x puts the outlier file PATH in filename_outlier and a bare
+    # integer row INDEX in outlier. Prefer the path columns (see _near_duplicates).
+    c_from = _first_col(cols, ["filename_outlier", "filename_from", "outlier", "from"])
     c_dist = _first_col(cols, ["distance", "score"])
     if not c_from:
         return []
@@ -200,15 +249,26 @@ def run_scan(image_dir: str, sensitivity: str, issue_types: list[str]) -> dict:
     else:
         _, valid = _detect_broken(image_dir, files)  # still exclude undecodable
 
+    want_dup = "duplicate" in issue_types
+    want_near = "near_duplicate" in issue_types
+    want_out = "outlier" in issue_types
+
+    # The exact-byte hash grouping serves two independent roles: it is the
+    # REPORTED "exact duplicates" section (only when the user asked for it) AND
+    # the exclusion set that keeps byte-identical pairs out of the near-duplicate
+    # / outlier passes. That exclusion must apply ALWAYS — a byte-identical pair
+    # must never leak into Near-duplicates just because "duplicate" wasn't in
+    # issue_types. So compute the grouping whenever any of the three passes needs
+    # it, but only surface the groups in the report when "duplicate" is requested.
     exact_groups: list[dict] = []
     exact_set: set[str] = set()
-    if "duplicate" in issue_types:
-        exact_groups, exact_set = _hash_duplicates(image_dir, valid)
+    if want_dup or want_near or want_out:
+        groups, exact_set = _hash_duplicates(image_dir, valid)
+        if want_dup:
+            exact_groups = groups
 
     near_groups: list[dict] = []
     outliers: list[dict] = []
-    want_near = "near_duplicate" in issue_types
-    want_out = "outlier" in issue_types
     if (want_near or want_out) and len(valid) >= 2:
         near_all, out_all = _fastdup_pass(image_dir, valid, threshold, exact_set)
         near_groups = near_all if want_near else []

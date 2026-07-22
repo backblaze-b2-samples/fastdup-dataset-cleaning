@@ -45,3 +45,11 @@ Known tech debt items. Agents update this when they discover or create tech debt
 | Custom `FileNotFoundError` shadowed the built-in | Renamed to `FileNotFoundServiceError` |
 | Dropzone accepted any file type client-side | `accept` allow-list mirroring backend `ALLOWED_TYPES` (tested for drift) |
 | No test harness for feature specs | pytest suite across upload, files, activity, errors, validation, rate limit, pagination |
+
+## 2026-07-22 — verify
+
+Nitpicks surfaced by the sample-3-verify UX funnel (backlog only; none block the goal):
+
+- Dashboard `/` "Recent Scans" table — a labeled run's **label** renders under the column headed **"Dataset"** (`recent-scans-table.tsx` shows `scan.label || scan.dataset`), so a first-timer can mistake run labels for dataset names → give labels their own column or a clearer header (shot `.local/verify/A/A-verify-01-landing.png`).
+- Datasets gallery `/datasets/demo` — a present-but-undecodable file (`broken_00.jpg`) renders the browser's native broken-image/alt state instead of the `ImageOff` placeholder (the `Thumbnail` component only falls back when the presigned URL is absent, not when it's present-but-corrupt); the "quarantined" badge also overlaps the caption on that tile → add an `onError` fallback to `ImageOff` (shot `.local/verify/B/B-verify-03-dataset-detail.png`).
+- Scan report "Broken/corrupt files" section — the broken-file **reason** leaks an internal local temp working-dir path (`cannot identify image file '/private/var/folders/.../dataset-scan-XXXX/0000_broken_00.jpg'`) instead of a clean message or the B2 object key → strip the temp path in `_detect_broken` / when surfacing the reason (shot `.local/verify/RV/R2-subset-02-report.png`).

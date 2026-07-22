@@ -44,7 +44,11 @@ API restart with no database.
 
 ## Flow
 - List: iterate dataset prefixes → read every `.../quality-reports/*/status.json`
-- Detail: locate the run, read `report.json`, mint fresh presigned preview URLs for flagged keys
+- Detail: locate the run, read `report.json`, then overlay the authoritative `cleaned` /
+  `quarantined_count` from `status.json` (which cleaning updates; `report.json` is frozen at
+  assembly time) and mint fresh presigned `preview_urls` for **every group's kept representative
+  plus its flagged members**, plus outliers and broken files — so the report's "keep" tile
+  renders next to the dups it was compared against, and the detail view agrees with the list.
 - Preview URLs are **not** stored (they expire); they are generated on read
 
 ## Edge Cases

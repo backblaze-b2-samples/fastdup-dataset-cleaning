@@ -5,14 +5,24 @@ python-dotenv>=1.0.0
 pydantic>=2.10.0
 pydantic-settings>=2.7.0
 boto3>=1.35.0
-Pillow>=11.0.0
+# Pinned to the 10.3.x line because fastdup 2.x hard-declares Pillow==10.3.0;
+# a >=11 pin is mutually exclusive with it (fresh install -> ResolutionImpossible).
+# All Pillow usage here (Image.open/verify/new/fromarray/save, ImageDraw, EXIF
+# tags) is available in 10.3.0.
+Pillow>=10.3.0,<11
 PyPDF2>=3.0.0
 
 # Dataset quality scan engine (local, CPU-only via ONNX runtime — no GPU path,
 # no external API key). Pulls in pandas/opencv-headless/onnxruntime. numpy is
-# pinned <2 because fastdup's native extensions are built against the 1.x ABI;
-# an unpinned numpy 2.x resolves on install but crashes at scan time.
-fastdup>=1.0,<2.0
+# pinned <2 because fastdup's native extensions are built against the 1.x ABI
+# (fastdup 2.53 itself declares numpy<2.0,>1.23.0); an unpinned numpy 2.x
+# resolves on install but crashes at scan time.
+# Version gate: older fastdup builds run a "you're on an old release" check AT
+# IMPORT that queries pypi and raises when 10+ releases behind; repo/scanner.py
+# sets FASTDUP_PRODUCTION=1 before importing to disable that network check (see
+# docs/features/dataset-scan.md). Pinned to the 2.x line: 1.85 self-aborts in
+# native code at RUN time ("This fastdup version is deprecated") — unbypassable.
+fastdup>=2.0,<3.0
 numpy<2
 
 # Dev / quality

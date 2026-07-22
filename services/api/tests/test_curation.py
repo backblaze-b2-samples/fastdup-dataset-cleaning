@@ -99,6 +99,75 @@ def test_start_scan_writes_running_status(monkeypatch):
     assert key in puts
 
 
+# --- get_run: preview URLs + authoritative cleaned-state overlay ------------
+
+
+def _complete_report(**overrides) -> "curation.ScanReport":
+    base = dict(
+        run_id="run123",
+        dataset="demo",
+        sensitivity="balanced",
+        issue_types=["duplicate", "broken"],
+        status=RunStatus.complete,
+        created_at="2026-07-21T00:00:00+00:00",
+        total_images=3,
+        issues_found=2,
+        duplicates=[
+            curation.DuplicateGroup(
+                group_id=0,
+                keep="datasets/demo/raw/a.jpg",
+                flagged=["datasets/demo/raw/a_copy.jpg"],
+                filenames=["a.jpg", "a_copy.jpg"],
+                score=1.0,
+            )
+        ],
+        broken=[
+            curation.BrokenItem(
+                key="datasets/demo/raw/broken.jpg", filename="broken.jpg", reason="x"
+            )
+        ],
+    )
+    base.update(overrides)
+    return curation.ScanReport(**base)
+
+
+def test_get_run_preview_urls_cover_keep_and_flagged(monkeypatch):
+    # Finding 2: the kept representative of each group must get a preview URL too
+    # (it was omitted before, so the "keep" tile rendered broken).
+    report = _complete_report()
+    summary = ScanSummary(**report.model_dump(include=set(ScanSummary.model_fields)))
+    monkeypatch.setattr(curation, "_find_run", lambda run_id: ("demo", summary))
+    monkeypatch.setattr(
+        curation, "get_object_bytes", lambda key: report.model_dump_json().encode("utf-8")
+    )
+    monkeypatch.setattr(curation, "presign_preview", lambda key: f"https://signed/{key}")
+
+    result = curation.get_run("run123")
+
+    assert "datasets/demo/raw/a.jpg" in result.preview_urls  # keep
+    assert "datasets/demo/raw/a_copy.jpg" in result.preview_urls  # flagged
+    assert "datasets/demo/raw/broken.jpg" in result.preview_urls  # broken
+
+
+def test_get_run_overlays_cleaned_state_from_status(monkeypatch):
+    # Finding 3: report.json is frozen at assembly time (cleaned=False), but
+    # status.json is the authoritative post-clean state — get_run must overlay it.
+    report = _complete_report(cleaned=False, quarantined_count=0)
+    summary = ScanSummary(**report.model_dump(include=set(ScanSummary.model_fields)))
+    summary.cleaned = True
+    summary.quarantined_count = 4
+    monkeypatch.setattr(curation, "_find_run", lambda run_id: ("demo", summary))
+    monkeypatch.setattr(
+        curation, "get_object_bytes", lambda key: report.model_dump_json().encode("utf-8")
+    )
+    monkeypatch.setattr(curation, "presign_preview", lambda key: "https://signed")
+
+    result = curation.get_run("run123")
+
+    assert result.cleaned is True
+    assert result.quarantined_count == 4
+
+
 # --- Safe cleaning: copy to quarantine, never delete ------------------------
 
 

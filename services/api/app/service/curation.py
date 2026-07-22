@@ -219,6 +219,8 @@ def _summary_of(report: ScanReport) -> ScanSummary:
 
 
 def _flagged_keys(report: ScanReport) -> list[str]:
+    """Keys the run will quarantine: flagged group members (never the kept
+    representative) plus every outlier and broken file."""
     keys: list[str] = []
     for g in report.duplicates + report.near_duplicates:
         keys.extend(g.flagged)
@@ -254,7 +256,12 @@ def get_run(run_id: str) -> ScanReport:
     if raw is None:
         return ScanReport(**summary.model_dump(include=set(ScanSummary.model_fields)))
     report = ScanReport.model_validate_json(raw)
-    report.preview_urls = {k: presign_preview(k) for k in _flagged_keys(report)}
+    # Overlay the authoritative cleaned state from status.json (report.json is frozen).
+    report.cleaned = summary.cleaned
+    report.quarantined_count = summary.quarantined_count
+    # Preview each group's kept representative too, so the "keep" tile renders.
+    keeps = [g.keep for g in report.duplicates + report.near_duplicates]
+    report.preview_urls = {k: presign_preview(k) for k in keeps + _flagged_keys(report)}
     return report
 
 
