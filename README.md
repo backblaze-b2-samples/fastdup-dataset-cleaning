@@ -13,6 +13,32 @@ B2 is both the **dataset store** (`datasets/<name>/raw/`) and the **artifact sto
 whole curation loop. Everything runs on local open source — **B2 credentials only, no
 second API key.**
 
+## What it looks like
+
+**Dashboard** — dataset-quality metrics, an issues-by-type chart, and the most recent curation runs.
+
+![Dashboard with datasets, images, issues-found, and quarantined metrics, an issues-by-type chart, and a recent-scans table](docs/images/dashboard.png)
+
+**Scans** — every fastdup curation run over a dataset, with its sensitivity, issue count, and status.
+
+![Scans list showing curation runs with dataset, sensitivity, issue counts, and status](docs/images/scans.png)
+
+**New scan** — configure a scan: pick a dataset, a sensitivity, and which issue types to detect.
+
+![New-scan form with a dataset select, sensitivity select, and issue-type checkboxes](docs/images/new-scan.png)
+
+**Scan report** — flagged images grouped by issue type (exact duplicates, near-duplicates, outliers, broken files) with a one-click quarantine that never deletes originals.
+
+![Scan report with duplicate, near-duplicate, outlier, and broken thumbnails and an Apply cleaning button](docs/images/scan-report.png)
+
+**Datasets** — image datasets stored under the app's `datasets/` prefix in B2, with image count and size.
+
+![Datasets explorer showing the demo dataset card with image count and size](docs/images/datasets.png)
+
+**Dataset detail** — a gallery of a dataset's actual images (real thumbnails via presigned URLs) with quarantine flags.
+
+![Dataset detail gallery of thumbnails with quarantined badges](docs/images/dataset-detail.png)
+
 ## The curation workflow
 
 ```
@@ -43,16 +69,6 @@ second API key.**
 Plus the reusable B2 scaffolding kept from the starter kit: a generic drag-and-drop
 **Upload**, a full-bucket **File browser**, a **Settings** page, and a **Design System**
 reference.
-
-## What it looks like
-
-**Dashboard** — curation metrics and recent scans:
-
-![Dashboard showing datasets, images, issues-by-type, and recent scans](docs/images/fastdup-dashboard.png)
-
-**Scan report** — flagged images grouped by issue type, with a one-click clean:
-
-![Scan report showing duplicate and outlier thumbnails](docs/images/fastdup-scan-report.png)
 
 ## Quick Start
 
